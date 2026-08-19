@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { getFileIcon, formatSize, formatDate } from '../utils'
+import { API_BASE } from '../config'
 
 function FileList({ files, loading, onDelete, onRefresh }) {
   const [search, setSearch] = useState('')
@@ -11,7 +12,7 @@ function FileList({ files, loading, onDelete, onRefresh }) {
 
   const handleDownload = filename => {
     const a = document.createElement('a')
-    a.href = `/api/download/${encodeURIComponent(filename)}`
+    a.href = `${API_BASE}/api/download/${encodeURIComponent(filename)}`
     a.download = filename
     a.click()
   }

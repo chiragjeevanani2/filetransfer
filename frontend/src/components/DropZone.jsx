@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { formatSize } from '../utils'
+import { API_BASE } from '../config'
 
 function DropZone({ onUploadComplete }) {
   const [dragging, setDragging] = useState(false)
@@ -43,7 +44,7 @@ function DropZone({ onUploadComplete }) {
         setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'error' } : u))
       }
 
-      xhr.open('POST', '/api/upload')
+      xhr.open('POST', `${API_BASE}/api/upload`)
       xhr.send(formData)
     })
   }, [onUploadComplete])

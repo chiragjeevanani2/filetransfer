@@ -7,7 +7,7 @@ import fs from 'fs'
 import os from 'os'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PORT = 3001
+const PORT = process.env.PORT || 3001
 const UPLOADS_DIR = path.join(__dirname, 'uploads')
 const isProd = process.env.NODE_ENV === 'production'
 
@@ -47,7 +47,10 @@ const storage = multer.diskStorage({
 const upload = multer({ storage })
 
 const app = express()
-app.use(cors())
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*',
+  methods: ['GET', 'POST', 'DELETE'],
+}))
 app.use(express.json())
 
 if (isProd) {
@@ -113,9 +116,9 @@ app.delete('/api/files/:filename', (req, res) => {
   res.json({ deleted: filename })
 })
 
-// Production fallback — serve React app
+// Production fallback — serve React app (regex required in Express 5)
 if (isProd) {
-  app.get('*', (req, res) => {
+  app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'))
   })
 }

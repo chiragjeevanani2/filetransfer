@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import NetworkInfo from './components/NetworkInfo'
 import DropZone from './components/DropZone'
 import FileList from './components/FileList'
+import { API_BASE } from './config'
 import './App.css'
 
 function App() {
@@ -15,7 +16,7 @@ function App() {
 
   // Fetch network info once on mount
   useEffect(() => {
-    fetch('/api/info')
+    fetch(`${API_BASE}/api/info`)
       .then(r => r.json())
       .then(info => setNetworkInfo(info))
       .catch(console.error)
@@ -24,7 +25,7 @@ function App() {
   // Re-fetch files whenever version changes
   useEffect(() => {
     let active = true
-    fetch('/api/files')
+    fetch(`${API_BASE}/api/files`)
       .then(r => r.json())
       .then(data => {
         if (!active) return
@@ -42,7 +43,7 @@ function App() {
   }, [])
 
   const handleDelete = async filename => {
-    await fetch(`/api/files/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+    await fetch(`${API_BASE}/api/files/${encodeURIComponent(filename)}`, { method: 'DELETE' })
     refreshFiles()
   }
 
