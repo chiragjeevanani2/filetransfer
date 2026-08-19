@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useFileTransfer } from './hooks/useFileTransfer'
+import { useBluetooth } from './hooks/useBluetooth'
 import DeviceName from './components/DeviceName'
 import DeviceList from './components/DeviceList'
 import TransferItem from './components/TransferItem'
+import BluetoothPanel from './components/BluetoothPanel'
 import './App.css'
 
 function App() {
@@ -11,6 +13,7 @@ function App() {
   )
 
   const { myId, devices, connected, outgoing, incoming, sendFile } = useFileTransfer(deviceName)
+  const { supported: btSupported, scanning, bluetoothDevices, startScan, stopScan, shareFileViaBluetooth, isNearby } = useBluetooth()
 
   const saveName = name => {
     localStorage.setItem('localdrop-name', name)
@@ -61,8 +64,23 @@ function App() {
               </span>
             )}
           </h2>
-          <DeviceList devices={devices} myId={myId} onSend={sendFile} />
+          <DeviceList
+            devices={devices}
+            myId={myId}
+            onSend={sendFile}
+            onShareViaBluetooth={shareFileViaBluetooth}
+            isNearby={isNearby}
+          />
         </section>
+
+        <BluetoothPanel
+          supported={btSupported}
+          scanning={scanning}
+          bluetoothDevices={bluetoothDevices}
+          onStartScan={startScan}
+          onStopScan={stopScan}
+          onShareFile={shareFileViaBluetooth}
+        />
       </main>
     </div>
   )
