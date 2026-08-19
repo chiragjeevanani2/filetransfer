@@ -11,6 +11,7 @@ export function useFileTransfer(deviceName) {
   const [incoming, setIncoming] = useState([]) // active receives
 
   const wsRef       = useRef(null)
+  const myIdRef     = useRef(null)   // mirrors myId for use inside closures
   const receivingRef = useRef({}) // transferId → { meta, chunks, received }
 
   useEffect(() => {
@@ -31,8 +32,9 @@ export function useFileTransfer(deviceName) {
 
       socket.onclose = () => {
         setConnected(false)
-        setDevices([])
+        myIdRef.current = null
         setMyId(null)
+        setDevices([])
         retryTimer = setTimeout(connect, 3000) // auto-reconnect
       }
 
@@ -50,12 +52,15 @@ export function useFileTransfer(deviceName) {
     function handleJson(msg) {
       switch (msg.type) {
         case 'registered':
+          myIdRef.current = msg.id
           setMyId(msg.id)
           break
 
-        case 'devices':
-          setDevices(msg.list)
+        case 'devices': {
+          const currentId = myIdRef.current
+          setDevices(msg.list.filter(d => d.id !== currentId))
           break
+        }
 
         case 'transfer-request':
           // New incoming file
