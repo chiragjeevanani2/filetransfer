@@ -1,124 +1,133 @@
 import express from 'express'
-import multer from 'multer'
 import cors from 'cors'
-import { fileURLToPath } from 'url'
-import path from 'path'
-import fs from 'fs'
-import os from 'os'
+import { createServer } from 'http'
+import { WebSocketServer } from 'ws'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 3001
-const UPLOADS_DIR = path.join(__dirname, 'uploads')
-
-
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true })
-}
-
-function getLocalIP() {
-  const nets = os.networkInterfaces()
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === 'IPv4' && !net.internal) {
-        return net.address
-      }
-    }
-  }
-  return 'localhost'
-}
-
-const storage = multer.diskStorage({
-  destination: UPLOADS_DIR,
-  filename: (req, file, cb) => {
-    // Fix encoding issues with non-ASCII filenames on Windows
-    const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8')
-    const ext = path.extname(originalName)
-    const base = path.basename(originalName, ext)
-    let finalName = originalName
-    let counter = 1
-    while (fs.existsSync(path.join(UPLOADS_DIR, finalName))) {
-      finalName = `${base} (${counter})${ext}`
-      counter++
-    }
-    cb(null, finalName)
-  }
-})
-
-const upload = multer({ storage })
-
-const app = express()
-// Strip accidental trailing slash from FRONTEND_URL
 const FRONTEND_URL = (process.env.FRONTEND_URL || '').replace(/\/+$/, '') || '*'
 
-app.use(cors({
-  origin: FRONTEND_URL,
-  methods: ['GET', 'POST', 'DELETE'],
-}))
-app.use(express.json())
+const app = express()
+app.use(cors({ origin: FRONTEND_URL }))
 
-// GET /api/info — returns network IP
-app.get('/api/info', (req, res) => {
-  const ip = getLocalIP()
-  res.json({ ip })
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', devices: devices.size })
 })
 
-// GET /api/files — list all uploaded files
-app.get('/api/files', (req, res) => {
-  try {
-    const files = fs.readdirSync(UPLOADS_DIR)
-      .filter(name => !name.startsWith('.'))
-      .map(name => {
-        const filePath = path.join(UPLOADS_DIR, name)
-        const stat = fs.statSync(filePath)
-        return { name, size: stat.size, modified: stat.mtime }
-      })
-      .sort((a, b) => new Date(b.modified) - new Date(a.modified))
-    res.json(files)
-  } catch (err) {
-    res.status(500).json({ error: err.message })
+// ── Device registry ─────────────────────────────────────────────
+const devices = new Map() // id → { ws, id, name, isAlive }
+
+function broadcastDeviceList() {
+  const list = Array.from(devices.values()).map(({ id, name }) => ({ id, name }))
+  const msg = JSON.stringify({ type: 'devices', list })
+  for (const { ws } of devices.values()) {
+    if (ws.readyState === 1) ws.send(msg)
   }
+}
+
+// ── HTTP + WebSocket server ──────────────────────────────────────
+const server = createServer(app)
+
+const wss = new WebSocketServer({
+  server,
+  // Only allow connections from the frontend origin in production
+  verifyClient: ({ origin }) => {
+    if (!origin || FRONTEND_URL === '*') return true
+    return origin === FRONTEND_URL
+  },
 })
 
-// POST /api/upload — upload one or more files
-app.post('/api/upload', upload.array('files', 50), (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ error: 'No files uploaded' })
-  }
-  res.json({ uploaded: req.files.map(f => ({ name: f.filename, size: f.size })) })
+// Heartbeat — keeps connections alive through Render's idle timeout
+const heartbeat = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) { ws.terminate(); return }
+    ws.isAlive = false
+    ws.ping()
+  })
+}, 25000)
+
+wss.on('close', () => clearInterval(heartbeat))
+
+wss.on('connection', (ws) => {
+  const id = crypto.randomUUID()
+  const device = { ws, id, name: 'Unknown Device', isAlive: true }
+  devices.set(id, device)
+
+  ws.isAlive = true
+  ws.on('pong', () => { ws.isAlive = true })
+
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) {
+      // Binary packet from sender: [transferId(36)][targetId(36)][chunk...]
+      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
+      if (buf.length < 72) return
+
+      const targetId = buf.slice(36, 72).toString()
+      const target = devices.get(targetId)
+
+      if (target?.ws.readyState === 1) {
+        // Forward to recipient: [transferId(36)][chunk...]
+        // (strip the targetId — recipient already knows the transfer from metadata)
+        target.ws.send(Buffer.concat([buf.slice(0, 36), buf.slice(72)]))
+      }
+      return
+    }
+
+    let msg
+    try { msg = JSON.parse(data.toString()) } catch { return }
+
+    switch (msg.type) {
+      case 'register':
+        device.name = String(msg.name || 'Unknown Device').trim().slice(0, 32)
+        ws.send(JSON.stringify({ type: 'registered', id }))
+        broadcastDeviceList()
+        break
+
+      case 'transfer-request': {
+        const target = devices.get(msg.to)
+        if (!target || target.ws.readyState !== 1) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Device not available' }))
+          return
+        }
+        target.ws.send(JSON.stringify({
+          type: 'transfer-request',
+          transferId: msg.transferId,
+          from: id,
+          fromName: device.name,
+          name: msg.name,
+          size: msg.size,
+          mime: msg.mime,
+        }))
+        break
+      }
+
+      case 'transfer-complete': {
+        const target = devices.get(msg.to)
+        if (target?.ws.readyState === 1) {
+          target.ws.send(JSON.stringify({
+            type: 'transfer-complete',
+            transferId: msg.transferId,
+          }))
+        }
+        break
+      }
+
+      case 'transfer-cancel': {
+        const target = devices.get(msg.to)
+        if (target?.ws.readyState === 1) {
+          target.ws.send(JSON.stringify({
+            type: 'transfer-cancel',
+            transferId: msg.transferId,
+          }))
+        }
+        break
+      }
+    }
+  })
+
+  ws.on('close', () => { devices.delete(id); broadcastDeviceList() })
+  ws.on('error', () => { devices.delete(id); broadcastDeviceList() })
 })
 
-// GET /api/download/:filename — download a file
-app.get('/api/download/:filename', (req, res) => {
-  const filename = decodeURIComponent(req.params.filename)
-  const filepath = path.join(UPLOADS_DIR, filename)
-  if (!filepath.startsWith(UPLOADS_DIR)) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
-  if (!fs.existsSync(filepath)) {
-    return res.status(404).json({ error: 'File not found' })
-  }
-  res.download(filepath, filename)
-})
-
-// DELETE /api/files/:filename — delete a file
-app.delete('/api/files/:filename', (req, res) => {
-  const filename = decodeURIComponent(req.params.filename)
-  const filepath = path.join(UPLOADS_DIR, filename)
-  if (!filepath.startsWith(UPLOADS_DIR)) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
-  if (!fs.existsSync(filepath)) {
-    return res.status(404).json({ error: 'File not found' })
-  }
-  fs.unlinkSync(filepath)
-  res.json({ deleted: filename })
-})
-
-
-app.listen(PORT, '0.0.0.0', () => {
-  const ip = getLocalIP()
-  console.log('\n🚀 LocalDrop API server running!')
-  console.log(`   Local:   http://localhost:${PORT}`)
-  console.log(`   Network: http://${ip}:${PORT}`)
-  console.log(`\n💡 Open the app at http://${ip}:5173 (dev) or your Vercel URL (prod)`)
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🚀 LocalDrop running on port ${PORT}\n`)
 })

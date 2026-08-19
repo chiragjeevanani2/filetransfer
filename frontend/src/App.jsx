@@ -1,51 +1,25 @@
-import { useState, useEffect, useCallback } from 'react'
-import NetworkInfo from './components/NetworkInfo'
-import DropZone from './components/DropZone'
-import FileList from './components/FileList'
-import { API_BASE } from './config'
+import { useState } from 'react'
+import { useFileTransfer } from './hooks/useFileTransfer'
+import DeviceName from './components/DeviceName'
+import DeviceList from './components/DeviceList'
+import TransferItem from './components/TransferItem'
 import './App.css'
 
 function App() {
-  const [files, setFiles] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [networkInfo, setNetworkInfo] = useState(null)
-  // Incrementing this triggers a file-list re-fetch
-  const [version, setVersion] = useState(0)
+  const [deviceName, setDeviceName] = useState(
+    () => localStorage.getItem('localdrop-name') || ''
+  )
 
-  const refreshFiles = useCallback(() => setVersion(v => v + 1), [])
+  const { myId, devices, connected, outgoing, incoming, sendFile } = useFileTransfer(deviceName)
 
-  // Fetch network info once on mount
-  useEffect(() => {
-    fetch(`${API_BASE}/api/info`)
-      .then(r => r.json())
-      .then(info => setNetworkInfo(info))
-      .catch(console.error)
-  }, [])
-
-  // Re-fetch files whenever version changes
-  useEffect(() => {
-    let active = true
-    fetch(`${API_BASE}/api/files`)
-      .then(r => r.json())
-      .then(data => {
-        if (!active) return
-        setFiles(data)
-        setLoading(false)
-      })
-      .catch(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [version])
-
-  // Auto-refresh every 5 s so uploads from other devices appear
-  useEffect(() => {
-    const id = setInterval(() => setVersion(v => v + 1), 5000)
-    return () => clearInterval(id)
-  }, [])
-
-  const handleDelete = async filename => {
-    await fetch(`${API_BASE}/api/files/${encodeURIComponent(filename)}`, { method: 'DELETE' })
-    refreshFiles()
+  const saveName = name => {
+    localStorage.setItem('localdrop-name', name)
+    setDeviceName(name)
   }
+
+  if (!deviceName) return <DeviceName onSave={saveName} />
+
+  const transfers = [...outgoing, ...incoming]
 
   return (
     <div className="app">
@@ -54,24 +28,40 @@ function App() {
           <span>📡</span>
           <h1>LocalDrop</h1>
         </div>
-        <div className="header-status">
-          <span className="dot" />
-          <span>{networkInfo ? networkInfo.ip : 'Connecting…'}</span>
+        <div className="header-right">
+          <span className="my-name" title="Your device name">{deviceName}</span>
+          <button
+            className="btn-rename"
+            title="Change device name"
+            onClick={() => { localStorage.removeItem('localdrop-name'); setDeviceName('') }}
+          >
+            ✏️
+          </button>
+          <span className={`status-dot ${connected ? 'online' : 'offline'}`} title={connected ? 'Connected' : 'Reconnecting…'} />
         </div>
       </header>
 
       <main className="app-main">
-        <aside className="left-col">
-          <NetworkInfo networkInfo={networkInfo} />
-          <DropZone onUploadComplete={refreshFiles} />
-        </aside>
-        <section className="right-col">
-          <FileList
-            files={files}
-            loading={loading}
-            onDelete={handleDelete}
-            onRefresh={refreshFiles}
-          />
+        {transfers.length > 0 && (
+          <section>
+            <h2 className="section-label">Active Transfers</h2>
+            <div className="transfer-list">
+              {outgoing.map(t => <TransferItem key={t.transferId} transfer={t} direction="out" />)}
+              {incoming.map(t => <TransferItem key={t.transferId} transfer={t} direction="in" />)}
+            </div>
+          </section>
+        )}
+
+        <section>
+          <h2 className="section-label">
+            Devices
+            {devices.filter(d => d.id !== myId).length > 0 && (
+              <span className="badge-online">
+                {devices.filter(d => d.id !== myId).length} online
+              </span>
+            )}
+          </h2>
+          <DeviceList devices={devices} myId={myId} onSend={sendFile} />
         </section>
       </main>
     </div>
