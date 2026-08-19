@@ -9,7 +9,7 @@ import os from 'os'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 3001
 const UPLOADS_DIR = path.join(__dirname, 'uploads')
-const isProd = process.env.NODE_ENV === 'production'
+
 
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true })
@@ -52,11 +52,6 @@ app.use(cors({
   methods: ['GET', 'POST', 'DELETE'],
 }))
 app.use(express.json())
-
-if (isProd) {
-  const distPath = path.join(__dirname, '..', 'frontend', 'dist')
-  app.use(express.static(distPath))
-}
 
 // GET /api/info — returns network IP
 app.get('/api/info', (req, res) => {
@@ -116,20 +111,11 @@ app.delete('/api/files/:filename', (req, res) => {
   res.json({ deleted: filename })
 })
 
-// Production fallback — serve React app (regex required in Express 5)
-if (isProd) {
-  app.get(/.*/, (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'))
-  })
-}
 
 app.listen(PORT, '0.0.0.0', () => {
   const ip = getLocalIP()
   console.log('\n🚀 LocalDrop API server running!')
   console.log(`   Local:   http://localhost:${PORT}`)
   console.log(`   Network: http://${ip}:${PORT}`)
-  if (!isProd) {
-    console.log(`\n💡 Open the app at http://${ip}:5173`)
-    console.log(`   Scan the QR code in the app to connect from any device\n`)
-  }
+  console.log(`\n💡 Open the app at http://${ip}:5173 (dev) or your Vercel URL (prod)`)
 })
