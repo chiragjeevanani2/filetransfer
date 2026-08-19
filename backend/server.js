@@ -17,6 +17,13 @@ app.get('/api/health', (req, res) => {
 const devices = new Map() // id → { ws, id, name, isAlive }
 
 function broadcastDeviceList() {
+  // Purge stale entries whose WebSocket is no longer open
+  for (const [id, device] of devices) {
+    if (device.ws.readyState !== 1) {
+      devices.delete(id)
+    }
+  }
+
   const list = Array.from(devices.values()).map(({ id, name }) => ({ id, name }))
   const msg = JSON.stringify({ type: 'devices', list })
   for (const { ws } of devices.values()) {
@@ -38,11 +45,21 @@ const wss = new WebSocketServer({
 
 // Heartbeat — keeps connections alive through Render's idle timeout
 const heartbeat = setInterval(() => {
+  // Sweep dead connections
+  for (const [id, device] of devices) {
+    if (device.ws.readyState !== 1) {
+      devices.delete(id)
+    }
+  }
+
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) { ws.terminate(); return }
     ws.isAlive = false
     ws.ping()
   })
+
+  // Broadcast the cleaned list so all clients stay in sync
+  broadcastDeviceList()
 }, 25000)
 
 wss.on('close', () => clearInterval(heartbeat))

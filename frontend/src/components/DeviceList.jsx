@@ -4,34 +4,60 @@ function initials(name) {
   return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'
 }
 
-function DeviceCard({ device, onSend }) {
-  const inputRef = useRef(null)
+function DeviceCard({ device, onSend, onShareViaBluetooth, isNearby }) {
+  const fileInputRef = useRef(null)
+  const btInputRef = useRef(null)
+  const nearby = isNearby(device.name)
 
-  const handleChange = e => {
+  const handleSend = e => {
     Array.from(e.target.files).forEach(f => onSend(f))
     e.target.value = ''
   }
 
+  const handleBtShare = async e => {
+    const files = Array.from(e.target.files)
+    for (const f of files) {
+      await onShareViaBluetooth(f)
+    }
+    e.target.value = ''
+  }
+
   return (
-    <div
-      className="device-card"
-      role="button"
-      tabIndex={0}
-      onClick={() => inputRef.current?.click()}
-      onKeyDown={e => e.key === 'Enter' && inputRef.current?.click()}
-    >
-      <div className="device-avatar">{initials(device.name)}</div>
-      <div className="device-info">
-        <span className="device-name">{device.name}</span>
-        <span className="device-hint">Click to send files</span>
+    <div className="device-card">
+      <div className="device-card-top">
+        <div className="device-left" onClick={() => fileInputRef.current?.click()}
+          role="button" tabIndex={0}
+          onKeyDown={e => e.key === 'Enter' && fileInputRef.current?.click()}
+        >
+          <div className="device-avatar">
+            {initials(device.name)}
+            {nearby && <span className="bt-nearby-dot" title="Nearby via Bluetooth" />}
+          </div>
+          <div className="device-info">
+            <span className="device-name">
+              {device.name}
+              {nearby && <span className="bt-nearby-tag">📶 Nearby</span>}
+            </span>
+            <span className="device-hint">Click to send files</span>
+          </div>
+          <span className="device-arrow">📤</span>
+        </div>
+
+        <button
+          className="btn-bt-send"
+          title="Share via Bluetooth"
+          onClick={() => btInputRef.current?.click()}
+        >
+          📶
+        </button>
       </div>
-      <span className="device-arrow">📤</span>
-      <input ref={inputRef} type="file" multiple hidden onChange={handleChange} />
+      <input ref={fileInputRef} type="file" multiple hidden onChange={handleSend} />
+      <input ref={btInputRef} type="file" multiple hidden onChange={handleBtShare} />
     </div>
   )
 }
 
-function DeviceList({ devices, myId, onSend }) {
+function DeviceList({ devices, myId, onSend, onShareViaBluetooth, isNearby }) {
   const others = devices.filter(d => d.id !== myId)
 
   if (others.length === 0) {
@@ -48,7 +74,13 @@ function DeviceList({ devices, myId, onSend }) {
   return (
     <div className="device-list">
       {others.map(d => (
-        <DeviceCard key={d.id} device={d} onSend={f => onSend(d.id, d.name, f)} />
+        <DeviceCard
+          key={d.id}
+          device={d}
+          onSend={f => onSend(d.id, d.name, f)}
+          onShareViaBluetooth={onShareViaBluetooth}
+          isNearby={isNearby}
+        />
       ))}
     </div>
   )
