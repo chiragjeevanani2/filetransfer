@@ -47,8 +47,11 @@ const storage = multer.diskStorage({
 const upload = multer({ storage })
 
 const app = express()
+// Strip accidental trailing slash from FRONTEND_URL
+const FRONTEND_URL = (process.env.FRONTEND_URL || '').replace(/\/+$/, '') || '*'
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: FRONTEND_URL,
   methods: ['GET', 'POST', 'DELETE'],
 }))
 app.use(express.json())
